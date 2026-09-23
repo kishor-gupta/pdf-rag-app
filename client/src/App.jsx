@@ -1,34 +1,60 @@
-import { useMemo, useState } from "react";
-import { Box } from "@mui/material";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Box, Snackbar } from "@mui/material";
 import AppHeader from "./components/AppHeader.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
-import { sendChat } from "./api.js";
+import { getFiles, sendChat, uploadFile } from "./api.js";
 
 function App() {
   const [pdfs, setPdfs] = useState([]);
   const [activePdfId, setActivePdfId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const activePdf = useMemo(
     () => pdfs.find((pdf) => pdf.id === activePdfId) ?? null,
     [pdfs, activePdfId]
   );
 
+  useEffect(() => {
+    let cancelled = false;
 
-  const handleUpload = (file) => {
+    getFiles()
+      .then(({ files }) => {
+        if (cancelled) return;
+        setPdfs(files);
+        setActivePdfId((current) => current ?? files[0]?.id ?? null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setToast({ severity: "error", message: error.message });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleUpload = async (file) => {
     if (!file) return;
 
-    const next = {
-      id: crypto.randomUUID(),
-      name: file.name,
-      size: file.size,
-      addedAt: new Date().toISOString(),
-    };
-
-    setPdfs((current) => [next, ...current]);
-    setActivePdfId(next.id);
+    setUploading(true);
+    try {
+      const uploaded = await uploadFile(file);
+      setPdfs((current) => [uploaded, ...current.filter((pdf) => pdf.id !== uploaded.id)]);
+      setActivePdfId(uploaded.id);
+      setToast({ severity: "success", message: `${uploaded.name} uploaded` });
+    } catch (error) {
+      setToast({
+        severity: "error",
+        message: error.message || "Upload failed",
+      });
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleSend = async (question) => {
@@ -72,7 +98,7 @@ function App() {
 
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <AppHeader/>
+      <AppHeader />
       <Box
         sx={{
           flex: 1,
@@ -85,6 +111,7 @@ function App() {
         <Sidebar
           pdfs={pdfs}
           activePdfId={activePdfId}
+          uploading={uploading}
           onSelectPdf={setActivePdfId}
           onUpload={handleUpload}
         />
@@ -95,6 +122,23 @@ function App() {
           onSend={handleSend}
         />
       </Box>
+      <Snackbar
+        open={Boolean(toast)}
+        autoHideDuration={4000}
+        onClose={() => setToast(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        {toast ? (
+          <Alert
+            onClose={() => setToast(null)}
+            severity={toast.severity}
+            variant="filled"
+            sx={{ width: "100%" }}
+          >
+            {toast.message}
+          </Alert>
+        ) : null}
+      </Snackbar>
     </Box>
   );
 }

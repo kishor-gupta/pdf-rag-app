@@ -17,7 +17,7 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function Sidebar({ pdfs, activePdfId, onSelectPdf, onUpload }) {
+function Sidebar({ pdfs, activePdfId, uploading, onSelectPdf, onUpload }) {
   const inputRef = useRef(null);
 
   return (
@@ -50,13 +50,14 @@ function Sidebar({ pdfs, activePdfId, onSelectPdf, onUpload }) {
         <Button
           fullWidth
           variant="contained"
+          disabled={uploading}
           startIcon={<CloudUploadRoundedIcon />}
           onClick={() => inputRef.current?.click()}
         >
-          Upload PDF
+          {uploading ? "Uploading…" : "Upload PDF"}
         </Button>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
-          File list is local for now. Upload API aap baad mein add kar sakte ho.
+          PDF server ke uploads folder mein save hota hai.
         </Typography>
       </Box>
 
