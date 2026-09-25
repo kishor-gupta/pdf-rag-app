@@ -3,12 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node index.js",
+    "dev": "nodemon --ext js --ignore uploads --ignore node_modules index.js",
     "start": "node index.js"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "multer": "^2.4.0"
+    "multer": "^2.4.0",
+    "ollama": "^0.6.3",
+    "pdf-parse": "^2.4.5"
   }
 }

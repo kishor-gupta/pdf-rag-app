@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
+import { embedUploadedPdf } from "./embedPdf.js";
 
 const app = express();
 const PORT = process.env.PORT || 5050;
@@ -77,7 +78,7 @@ app.get("/api/files", (_req, res) => {
 });
 
 app.post("/api/upload", (req, res) => {
-  upload.single("file")(req, res, (err) => {
+  upload.single("file")(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -86,7 +87,15 @@ app.post("/api/upload", (req, res) => {
       return res.status(400).json({ error: "file is required" });
     }
 
-    res.json(fileFromDisk(req.file.filename));
+    const uploaded = fileFromDisk(req.file.filename);
+
+    try {
+      await embedUploadedPdf(req.file.path, uploaded.name);
+    } catch (error) {
+      console.error(`[embed] ${uploaded.name} failed:`, error.message);
+    }
+
+    res.json(uploaded);
   });
 });
 
