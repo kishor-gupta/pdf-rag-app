@@ -3,15 +3,17 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
+import dotenv from "dotenv";
 import express from "express";
 import multer from "multer";
 import { embedUploadedPdf, embedUserQuery } from "./embedPdf.js";
-import { addChunks, getStoreSummary } from "./memoryStore.js";
 import { answerWithOllama } from "./generateAnswer.js";
+import { getPineconeSummary } from "./pineconeStore.js";
 
 const app = express();
-const PORT = process.env.PORT || 5050;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
+const PORT = process.env.PORT || 5050;
 const UPLOAD_DIR = path.join(__dirname, "uploads");
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -79,8 +81,12 @@ app.get("/api/files", (_req, res) => {
   res.json({ files: listUploadedFiles() });
 });
 
-app.get("/api/embeddings", (_req, res) => {
-  res.json(getStoreSummary());
+app.get("/api/embeddings", async (_req, res) => {
+  try {
+    res.json(await getPineconeSummary());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.post("/api/upload", (req, res) => {
@@ -101,11 +107,10 @@ app.post("/api/upload", (req, res) => {
         uploaded.name,
         uploaded.id,
       );
-      addChunks(records);
       uploaded.chunkCount = records.length;
     } catch (error) {
       console.error(`[embed] ${uploaded.name} failed:`, error.message);
-      uploaded.chunkCount = 0;
+      return res.status(500).json({ error: error.message });
     }
 
     res.json(uploaded);
@@ -113,7 +118,8 @@ app.post("/api/upload", (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { question, pdfName } = req.body ?? {};
+  const { question, pdfId, pdfName } = req.body ?? {};
+  const selectedPdfId = pdfId ?? pdfName ?? null;
 
   if (!question || typeof question !== "string" || !question.trim()) {
     return res.status(400).json({
@@ -121,30 +127,36 @@ app.post("/api/chat", async (req, res) => {
     });
   }
 
-  const matches = await embedUserQuery(pdfName, question);
-
-  if (!matches.length) {
-    return res.json({
-      answer:
-        "No chunks found in memory for this PDF. Upload it first, then ask again.",
-      question: question.trim(),
-      pdfName: pdfName ?? null,
-      matches,
+  if (!selectedPdfId) {
+    return res.status(400).json({
+      error: "Select a PDF first",
     });
   }
 
   try {
+    const matches = await embedUserQuery(selectedPdfId, question);
+
+    if (!matches.length) {
+      return res.json({
+        answer:
+          "No chunks found in Pinecone for this PDF. Upload it first, then ask again.",
+        question: question.trim(),
+        pdfId: selectedPdfId,
+        matches,
+      });
+    }
+
     const answer = await answerWithOllama(question.trim(), matches);
     res.json({
       answer,
       question: question.trim(),
-      pdfName: pdfName ?? null,
+      pdfId: selectedPdfId,
       matches,
     });
   } catch (error) {
-    console.error("[llm] failed:", error.message);
+    console.error("[chat] failed:", error.message);
     res.status(500).json({
-      error: "Could not get an answer from Ollama. Make sure Ollama is running (llama3.1).",
+      error: error.message || "Chat search failed",
     });
   }
 });

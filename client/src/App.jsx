@@ -75,7 +75,7 @@ function App() {
     try {
       const data = await sendChat({
         question,
-        pdfName: activePdfId ?? null,
+        pdfId: activePdfId ?? null,
       });
 
       setMessages((current) => [

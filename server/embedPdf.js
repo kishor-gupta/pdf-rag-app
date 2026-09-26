@@ -1,13 +1,26 @@
 import fs from "fs/promises";
 import ollama from "ollama";
+import { Document } from "@langchain/core/documents";
+import { OllamaEmbeddings } from "@langchain/ollama";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { PDFParse } from "pdf-parse";
-import { getRecordByPDFId } from "./memoryStore.js"
+import { queryChunks, upsertChunks } from "./pineconeStore.js";
 
 const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || "nomic-embed-text";
 const CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL || "llama3.1";
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 200;
 const TOP_K = 5;
+
+const embeddings = new OllamaEmbeddings({
+  model: EMBED_MODEL,
+  baseUrl: "http://127.0.0.1:11434",
+});
+
+const splitter = new RecursiveCharacterTextSplitter({
+  chunkSize: CHUNK_SIZE,
+  chunkOverlap: CHUNK_OVERLAP,
+});
 
 async function rewriteQuery(question) {
   const response = await ollama.chat({
@@ -29,72 +42,63 @@ async function rewriteQuery(question) {
   return rewritten || question;
 }
 
-async function createEmbed(text) {
-  return await ollama.embed({
-    model: EMBED_MODEL,
-    input: text,
-  });
-}
-
-function cosineSimilarity(vecA, vecB) {
-  const dotProduct = vecA.reduce((sum, val, i) => sum + val * vecB[i], 0);
-  const magnitudeA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0));
-  const magnitudeB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0));
-  return dotProduct / (magnitudeA * magnitudeB);
-}
-
-function chunkText(text) {
-  const cleaned = text.replace(/\s+/g, " ").trim();
-  if (!cleaned) return [];
-
-  const chunks = [];
-  const step = CHUNK_SIZE - CHUNK_OVERLAP;
-
-  for (let i = 0; i < cleaned.length; i += step) {
-    chunks.push(cleaned.slice(i, i + CHUNK_SIZE));
-    if (i + CHUNK_SIZE >= cleaned.length) break;
-  }
-
-  return chunks;
-}
-
-async function extractPdfText(filePath) {
+async function loadPdfDocuments(filePath, originalName) {
   const data = await fs.readFile(filePath);
   const parser = new PDFParse({ data });
 
   try {
     const result = await parser.getText();
-    return result.text?.trim() ?? "";
+    if (result.pages?.length) {
+      return result.pages
+        .filter((page) => page.text?.trim())
+        .map(
+          (page) =>
+            new Document({
+              pageContent: page.text.trim(),
+              metadata: { source: originalName, page: page.num },
+            })
+        );
+    }
+
+    if (result.text?.trim()) {
+      return [
+        new Document({
+          pageContent: result.text.trim(),
+          metadata: { source: originalName },
+        }),
+      ];
+    }
+
+    return [];
   } finally {
     await parser.destroy();
   }
 }
 
 export async function embedUploadedPdf(filePath, originalName, pdfId) {
-  const text = await extractPdfText(filePath);
+  const docs = await loadPdfDocuments(filePath, originalName);
 
-  if (!text) {
+  if (!docs.length) {
     console.log(`[embed] ${originalName}: text not found from PDF`);
     return [];
   }
 
-  const parts = chunkText(text);
-  const records = [];
+  const splits = await splitter.splitDocuments(docs);
+  const texts = splits.map((doc) => doc.pageContent).filter(Boolean);
 
-  for (let i = 0; i < parts.length; i++) {
-    const response = await createEmbed(parts[i]);
-    const embedding = response.embeddings?.[0] ?? [];
+  console.log(`[embed] ${originalName}: ${texts.length} LangChain chunk(s)`);
 
-    records.push({
-      id: crypto.randomUUID(),
-      pdfId,
-      pdfName: originalName,
-      chunkIndex: i,
-      text: parts[i],
-      embedding,
-    });
-  }
+  const vectors = await embeddings.embedDocuments(texts);
 
+  const records = texts.map((text, i) => ({
+    pdfId,
+    pdfName: originalName,
+    chunkIndex: i,
+    text,
+    embedding: vectors[i] ?? [],
+  }));
+
+  await upsertChunks(records);
   return records;
 }
 
@@ -103,25 +107,15 @@ export async function embedUserQuery(fileInfo, question) {
   console.log("[search] query:", question);
   console.log("[search] rewritten:", searchQuery);
 
-  const emb = await createEmbed(searchQuery);
-  const queryEmbedding = emb?.embeddings?.[0];
-  const findMatchPdf = getRecordByPDFId(fileInfo);
-  const pdfChunks = findMatchPdf.embedding ?? [];
+  const queryEmbedding = await embeddings.embedQuery(searchQuery);
+  console.log(`[search] query embedding dims=${queryEmbedding?.length ?? 0}`);
 
-  if (!queryEmbedding?.length || pdfChunks.length === 0) {
-    console.log("[search] no chunks found", { fileInfo, chunks: pdfChunks.length });
+  const matches = await queryChunks(fileInfo, queryEmbedding, TOP_K);
+
+  if (!matches.length) {
+    console.log("[search] no chunks found", { fileInfo });
     return [];
   }
-
-  const matches = pdfChunks
-    .map((chunk) => ({
-      chunkIndex: chunk.chunkIndex,
-      text: chunk.text,
-      score: cosineSimilarity(queryEmbedding, chunk.embedding),
-    }))
-    .filter((item) => Number.isFinite(item.score))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, TOP_K);
 
   console.log("[search] top matches:", matches.length);
   matches.forEach((match, index) => {

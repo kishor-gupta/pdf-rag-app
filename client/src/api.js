@@ -29,11 +29,11 @@ export async function uploadFile(file) {
   return response.json();
 }
 
-export async function sendChat({ question, pdfName }) {
+export async function sendChat({ question, pdfId }) {
   const response = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, pdfName }),
+    body: JSON.stringify({ question, pdfId }),
   });
 
   if (!response.ok) {
