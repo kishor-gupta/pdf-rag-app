@@ -50,8 +50,7 @@ function ChatPanel({ activePdf, messages, sending, onSend }) {
             <ForumOutlinedIcon sx={{ fontSize: 40, color: "primary.main" }} />
             <Typography variant="h6">Start a PDF conversation</Typography>
             <Typography variant="body2" color="text.secondary">
-              Left side se PDF choose karo, neeche question likho. POST /api/chat
-              already wired hai — RAG logic baad mein backend mein add karna.
+              Choose a PDF on the left, then ask a question below.
             </Typography>
           </Stack>
         ) : (

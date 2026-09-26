@@ -46,7 +46,12 @@ function App() {
       const uploaded = await uploadFile(file);
       setPdfs((current) => [uploaded, ...current.filter((pdf) => pdf.id !== uploaded.id)]);
       setActivePdfId(uploaded.id);
-      setToast({ severity: "success", message: `${uploaded.name} uploaded` });
+      setToast({
+        severity: "success",
+        message: `${uploaded.name} uploaded${
+          uploaded.chunkCount ? `, ${uploaded.chunkCount} chunk(s) in memory` : ""
+        }`,
+      });
     } catch (error) {
       setToast({
         severity: "error",
@@ -70,7 +75,7 @@ function App() {
     try {
       const data = await sendChat({
         question,
-        pdfName: activePdf?.name ?? null,
+        pdfName: activePdfId ?? null,
       });
 
       setMessages((current) => [

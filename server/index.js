@@ -5,7 +5,9 @@ import { fileURLToPath } from "url";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
-import { embedUploadedPdf } from "./embedPdf.js";
+import { embedUploadedPdf, embedUserQuery } from "./embedPdf.js";
+import { addChunks, getStoreSummary } from "./memoryStore.js";
+import { answerWithOllama } from "./generateAnswer.js";
 
 const app = express();
 const PORT = process.env.PORT || 5050;
@@ -77,6 +79,10 @@ app.get("/api/files", (_req, res) => {
   res.json({ files: listUploadedFiles() });
 });
 
+app.get("/api/embeddings", (_req, res) => {
+  res.json(getStoreSummary());
+});
+
 app.post("/api/upload", (req, res) => {
   upload.single("file")(req, res, async (err) => {
     if (err) {
@@ -90,16 +96,23 @@ app.post("/api/upload", (req, res) => {
     const uploaded = fileFromDisk(req.file.filename);
 
     try {
-      await embedUploadedPdf(req.file.path, uploaded.name);
+      const records = await embedUploadedPdf(
+        req.file.path,
+        uploaded.name,
+        uploaded.id,
+      );
+      addChunks(records);
+      uploaded.chunkCount = records.length;
     } catch (error) {
       console.error(`[embed] ${uploaded.name} failed:`, error.message);
+      uploaded.chunkCount = 0;
     }
 
     res.json(uploaded);
   });
 });
 
-app.post("/api/chat", (req, res) => {
+app.post("/api/chat", async (req, res) => {
   const { question, pdfName } = req.body ?? {};
 
   if (!question || typeof question !== "string" || !question.trim()) {
@@ -108,12 +121,32 @@ app.post("/api/chat", (req, res) => {
     });
   }
 
-  res.json({
-    answer:
-      "Backend stub: aap ka question mil gaya. Yahan RAG pipeline (PDF parse → embed → retrieve → LLM) lagani hai.",
-    question: question.trim(),
-    pdfName: pdfName ?? null,
-  });
+  const matches = await embedUserQuery(pdfName, question);
+
+  if (!matches.length) {
+    return res.json({
+      answer:
+        "No chunks found in memory for this PDF. Upload it first, then ask again.",
+      question: question.trim(),
+      pdfName: pdfName ?? null,
+      matches,
+    });
+  }
+
+  try {
+    const answer = await answerWithOllama(question.trim(), matches);
+    res.json({
+      answer,
+      question: question.trim(),
+      pdfName: pdfName ?? null,
+      matches,
+    });
+  } catch (error) {
+    console.error("[llm] failed:", error.message);
+    res.status(500).json({
+      error: "Could not get an answer from Ollama. Make sure Ollama is running (llama3.1).",
+    });
+  }
 });
 
 app.listen(PORT, () => {

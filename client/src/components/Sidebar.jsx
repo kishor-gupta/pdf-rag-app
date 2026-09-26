@@ -57,7 +57,7 @@ function Sidebar({ pdfs, activePdfId, uploading, onSelectPdf, onUpload }) {
           {uploading ? "Uploading…" : "Upload PDF"}
         </Button>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
-          PDF server ke uploads folder mein save hota hai.
+          PDFs are saved in the server uploads folder.
         </Typography>
       </Box>
 
@@ -66,7 +66,7 @@ function Sidebar({ pdfs, activePdfId, uploading, onSelectPdf, onUpload }) {
           <Stack alignItems="center" spacing={1} sx={{ py: 6, px: 2, textAlign: "center" }}>
             <DescriptionRoundedIcon sx={{ fontSize: 36, color: "text.disabled" }} />
             <Typography variant="body2" color="text.secondary">
-              Abhi koi PDF nahi hai. Upload karke chat start karo.
+              No PDFs yet. Upload one to start chatting.
             </Typography>
           </Stack>
         ) : (
