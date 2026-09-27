@@ -9,6 +9,18 @@ import multer from "multer";
 import { embedUploadedPdf, embedUserQuery } from "./embedPdf.js";
 import { answerWithOllama } from "./generateAnswer.js";
 import { getPineconeSummary } from "./pineconeStore.js";
+import { PDFDocument } from "pdf-lib";
+
+async function checkIfPdfEncrypted(filePath) {
+  const bytes = fs.readFileSync(filePath);
+  try {
+    await PDFDocument.load(bytes);
+    return false;
+  } catch (err) {
+    if (err.message.includes("encrypted")) return true;
+    throw err;
+  }
+}
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -99,8 +111,15 @@ app.post("/api/upload", (req, res) => {
       return res.status(400).json({ error: "file is required" });
     }
 
+    const isEncrypted = await checkIfPdfEncrypted(req.file.path);
+    
+    if (isEncrypted) {
+      await fs.promises.unlink(req.file.path);
+      return res
+        .status(400)
+        .json({ error: "Encrypted PDFs are not supported" });
+    }
     const uploaded = fileFromDisk(req.file.filename);
-
     try {
       const records = await embedUploadedPdf(
         req.file.path,
